@@ -8,11 +8,13 @@ const {
     Browsers,
     delay,
     makeCacheableSignalKeyStore,
-    fetchLatestBaileysVersion,
     DisconnectReason,
 } = require("@whiskeysockets/baileys");
 
 const router = express.Router();
+
+// Hardcoded Baileys WA version — update periodically if connections start failing
+const WA_VERSION = [2, 3000, 1023223821];
 
 function removeFile(filePath) {
     if (!fs.existsSync(filePath)) return false;
@@ -26,11 +28,10 @@ router.get('/', async (req, res) => {
     async function JUNEX() {
         const { state, saveCreds } = await useMultiFileAuthState('./temp/' + id);
         try {
-            const { version } = await fetchLatestBaileysVersion();
             const logger = pino({ level: 'silent' });
 
             const client = makeWASocket({
-                version,
+                version: WA_VERSION,
                 auth: {
                     creds: state.creds,
                     keys: makeCacheableSignalKeyStore(state.keys, logger),
