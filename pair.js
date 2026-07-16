@@ -100,7 +100,7 @@ router.get('/', async (req, res) => {
                         const b64data = Buffer.from(data).toString('base64');
                         const session = await client.sendMessage(userJid, { text: 'Ultra-X:~' + b64data });
                         await client.sendMessage(userJid, {
-                            text: "```Linked ✅ Keep this session_id private. Paste it as SESSION during deploy.\nSupport: https://wa.me/message/254798952773```"
+                            text: "```🟢 Session Linked..\n\n🟢 Paste it as SESSION during deploy.\n🟢 Support: https://wa.me/message/254798952773```"
                         }, { quoted: session });
                         await delay(500);
                         await client.ws.close();
