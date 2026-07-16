@@ -11,6 +11,7 @@ const {
     makeCacheableSignalKeyStore,
     fetchLatestBaileysVersion,
     DisconnectReason,
+    jidNormalizedUser,
 } = require("@whiskeysockets/baileys");
 
 let router = express.Router();
@@ -26,7 +27,12 @@ router.get('/', async (req, res) => {
     async function JUNEX() {
         const { state, saveCreds } = await useMultiFileAuthState('./temp/' + id);
         try {
-            const { version } = await fetchLatestBaileysVersion();
+            let version;
+            try {
+                ({ version } = await fetchLatestBaileysVersion());
+            } catch {
+                version = [2, 3000, 1015901307]; // fallback if GitHub is unreachable
+            }
             const logger = pino({ level: 'silent' });
 
             let client = makeWASocket({
@@ -53,22 +59,23 @@ router.get('/', async (req, res) => {
 
                 if (connection === 'open') {
                     try {
-                        await client.sendMessage(client.user.id, {
+                        const userJid = jidNormalizedUser(client.user.id);
+                        await client.sendMessage(userJid, {
                             text: '⚡ *JuneX Ultra* ⚡\nGenerating your session, please wait a moment...'
                         });
-                        await delay(50000);
+                        await delay(5000);
                         let data = fs.readFileSync(__dirname + `/temp/${id}/creds.json`);
-                        await delay(8000);
+                        await delay(2000);
                         let b64data = Buffer.from(data).toString('base64');
-                        let session = await client.sendMessage(client.user.id, { text: 'Ultra-X:~' + b64data });
-                        await client.sendMessage(client.user.id, {
+                        let session = await client.sendMessage(userJid, { text: 'Ultra-X:~' + b64data });
+                        await client.sendMessage(userJid, {
                             text: "```⚡ JuneX Ultra has been linked to your WhatsApp account!\n\nDo NOT share this session_id with anyone.\n\nCopy and paste it on the SESSION string during deploy — it will be used for authentication.\n\nFor any issues, reach us via:\nhttps://wa.me/message/YNDA2RFTE35LB1\n\nDon't forget to sleep 😴, for even the relentless must recharge ⚡.\n\nGoodluck 🎉 — JuneX Ultra```"
                         }, { quoted: session });
                         await delay(500);
                         await client.ws.close();
                         removeFile('./temp/' + id);
                     } catch (e) {
-                        console.log('Error sending session messages:', e);
+                        console.log('Error sending session messages:', e.message);
                     }
                 } else if (connection === 'close') {
                     const code = lastDisconnect?.error?.output?.statusCode;
@@ -80,7 +87,7 @@ router.get('/', async (req, res) => {
             });
 
         } catch (err) {
-            console.log('QR service error:', err);
+            console.log('QR service error:', err.message);
             if (!res.headersSent) {
                 await res.json({ code: 'Service is Currently Unavailable' });
             }
