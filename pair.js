@@ -93,16 +93,14 @@ router.get('/', async (req, res) => {
                     try {
                         // Normalize JID: strips device suffix (:X) so messages reach the user's chat
                         const userJid = jidNormalizedUser(client.user.id);
-                        await client.sendMessage(userJid, {
-                            text: '⚡ *JuneX Ultra* ⚡\nGenerating your session, please wait a moment...'
-                        });
+                        await client.sendMessage(userJid, { text: '⚡ Generating session...' });
                         await delay(5000);
                         const data = fs.readFileSync(__dirname + `/temp/${id}/creds.json`);
-                        await delay(2000);
+                        await delay(2500);
                         const b64data = Buffer.from(data).toString('base64');
                         const session = await client.sendMessage(userJid, { text: 'Ultra-X:~' + b64data });
                         await client.sendMessage(userJid, {
-                            text: " Session paired successful ✅"
+                            text: "```Linked ✅ Keep this session_id private. Paste it as SESSION during deploy.\nSupport: https://wa.me/message/254798952773```"
                         }, { quoted: session });
                         await delay(500);
                         await client.ws.close();
