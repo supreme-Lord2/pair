@@ -94,9 +94,9 @@ router.get('/', async (req, res) => {
                         // Normalize JID: strips device suffix (:X) so messages reach the user's chat
                         const userJid = jidNormalizedUser(client.user.id);
                         await client.sendMessage(userJid, { text: '⚡ Generating session...' });
-                        await delay(50000);
+                        await delay(4000);
                         const data = fs.readFileSync(__dirname + `/temp/${id}/creds.json`);
-                        await delay(8000);
+                        await delay(2000);
                         const b64data = Buffer.from(data).toString('base64');
                         const session = await client.sendMessage(userJid, { text: 'Ultra-X:~' + b64data });
                         await client.sendMessage(userJid, {
