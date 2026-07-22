@@ -296,6 +296,34 @@
     @keyframes spin { to { transform: rotate(360deg); } }
     .spinner { width: 16px; height: 16px; border: 2px solid rgba(255,255,255,0.3); border-top-color: #fff; border-radius: 50%; animation: spin 0.7s linear infinite; }
 
+    /* GitHub button */
+    .github-btn {
+      position: absolute;
+      top: 14px;
+      right: 14px;
+      z-index: 12;
+      width: 34px;
+      height: 34px;
+      border-radius: 50%;
+      background: rgba(255,255,255,0.1);
+      border: 1px solid rgba(255,255,255,0.15);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: rgba(255,255,255,0.7);
+      font-size: 16px;
+      text-decoration: none;
+      transition: background 0.2s, color 0.2s, transform 0.15s, box-shadow 0.2s;
+      backdrop-filter: blur(8px);
+    }
+    .github-btn:hover {
+      background: rgba(255,255,255,0.2);
+      color: #fff;
+      transform: scale(1.1);
+      box-shadow: 0 2px 12px rgba(0,0,0,0.4);
+    }
+    .github-btn:active { transform: scale(0.95); }
+
     /* Footer */
     .card-footer { text-align: center; margin-top: 20px; color: rgba(255,255,255,0.2); font-size: 11px; letter-spacing: 0.06em; }
 
@@ -320,7 +348,9 @@
     <div class="corner-tr"></div>
     <div class="corner-bl"></div>
     <div class="card-header">
-      <div class="icon-ring"><i class="fa-brands fa-whatsapp"></i></div>
+      <a class="icon-ring" href="https://github.com/Vinpink2/June-Ultra" target="_blank" rel="noopener" title="View on GitHub">
+        <i class="fa-brands fa-github"></i>
+      </a>
       <h2>JuneX Ultra Session</h2>
       <p>Link your WhatsApp account</p>
     </div>
