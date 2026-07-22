@@ -64,8 +64,25 @@ router.get('/', async (req, res) => {
                             text: '⚡ *JuneX Ultra* ⚡\nGenerating your session, please wait a moment...'
                         });
                         await delay(5000);
-                        let data = fs.readFileSync(__dirname + `/temp/${id}/creds.json`);
-                        await delay(2000);
+
+                        // Wait for creds.json to be written with actual content (saveCreds is async)
+                        const credsPath = __dirname + `/temp/${id}/creds.json`;
+                        let data;
+                        for (let attempt = 0; attempt < 10; attempt++) {
+                            if (fs.existsSync(credsPath)) {
+                                data = fs.readFileSync(credsPath);
+                                if (data && data.length > 10) break; // non-empty file
+                            }
+                            await delay(1000);
+                        }
+
+                        if (!data || data.length <= 10) {
+                            console.log('creds.json still empty after retries, aborting session send');
+                            await client.ws.close();
+                            removeFile('./temp/' + id);
+                            return;
+                        }
+
                         let b64data = Buffer.from(data).toString('base64');
                         let session = await client.sendMessage(userJid, { text: 'Ultra-X:~' + b64data });
                         await client.sendMessage(userJid, {
