@@ -93,7 +93,7 @@ router.get('/', async (req, res) => {
                         console.log('Error sending session messages:', e.message);
                         try {
                             await client.sendMessage(jidNormalizedUser(client.user.id), {
-                                text: '⚠️ Session could not be completed. Please scan again.'
+                                text: `⚠️ Session could not be completed (${e.message}). Please scan again.`
                             });
                         } catch (_) {}
                         try { await client.ws.close(); } catch (_) {}
