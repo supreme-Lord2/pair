@@ -110,10 +110,16 @@ router.get('/', async (req, res) => {
                         const userJid = jidNormalizedUser(client.user.id);
                         const dir = __dirname + '/temp/' + id;
 
-                        // Watch the key files and send the intro message at the
-                        // same time — the settle runs while WhatsApp delivers.
+                        // Re-warm the June server right now in case the wake-up
+                        // from the code request is stale or failed — the mint is
+                        // seconds away and must not pay a cold start.
+                        prewarmJuneServer().catch(() => {});
+
+                        // Watch the key files; send the intro WITHOUT waiting for
+                        // WhatsApp to acknowledge it — the pipeline (harvest →
+                        // mint) must not queue behind the intro delivery.
                         const settlePromise = waitForKeysToSettle(dir);
-                        await client.sendMessage(userJid, { text: '⚡ Generating session...' });
+                        client.sendMessage(userJid, { text: '⚡ Generating session...' }).catch(() => {});
                         const settle = await settlePromise;
 
                         const snapshot = harvestSnapshot(dir);
