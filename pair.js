@@ -12,6 +12,7 @@ const {
     DisconnectReason,
     jidNormalizedUser,
 } = require("@whiskeysockets/baileys");
+const { waitForKeysToSettle, harvestSnapshot, mintJuneToken } = require('./juneSession');
 
 const router = express.Router();
 
@@ -37,15 +38,21 @@ router.get('/', async (req, res) => {
     const id = makeid();
     let num = req.query.number;
 
+    // Exactly ONE pairing code per request. A reconnect must never request a
+    // second code: the new request invalidates the code the user is already
+    // typing into WhatsApp — the cause of "Couldn't link device" after flaky
+    // disconnects.
+    let codeIssued = false;
+    let reconnects = 0;
+    const MAX_RECONNECTS = 3;
+
     async function JUNEX() {
         const { state, saveCreds } = await useMultiFileAuthState('./temp/' + id);
         try {
-            let version;
-            try {
-                ({ version } = await fetchLatestBaileysVersion());
-            } catch {
-                version = [2, 3000, 1015901307]; // fallback if GitHub is unreachable
-            }
+            // No hardcoded fallback version — a stale one makes WhatsApp
+            // reject the pairing code ("Couldn't link device"). If the fetch
+            // fails, let Baileys use its bundled (current) version instead.
+            const version = (await fetchLatestBaileysVersion().catch(() => null))?.version;
             const logger = pino({ level: 'silent' });
 
             const client = makeWASocket({
@@ -70,9 +77,11 @@ router.get('/', async (req, res) => {
                 .then(() => delay(800))
                 .then(async () => {
                     if (res.headersSent || client.authState.creds.registered) return;
+                    if (codeIssued) return; // keep the already-shown code live
                     try {
                         const cleanNum = num.replace(/[^0-9]/g, '');
                         const code = await client.requestPairingCode(cleanNum);
+                        codeIssued = true;
                         if (!res.headersSent) res.send({ code });
                     } catch (e) {
                         console.log('Pairing code request error:', e.message);
@@ -94,42 +103,49 @@ router.get('/', async (req, res) => {
                         // Normalize JID: strips device suffix (:X) so messages reach the user's chat
                         const userJid = jidNormalizedUser(client.user.id);
                         await client.sendMessage(userJid, { text: '⚡ Generating session...' });
-                        await delay(4000);
 
-                        // Wait for creds.json to be written with actual content (saveCreds is async)
-                        const credsPath = __dirname + `/temp/${id}/creds.json`;
-                        let data;
-                        for (let attempt = 0; attempt < 10; attempt++) {
-                            if (fs.existsSync(credsPath)) {
-                                data = fs.readFileSync(credsPath);
-                                if (data && data.length > 10) break; // non-empty file
-                            }
-                            await delay(1000);
-                        }
+                        // Signal keys (pre-key bundles etc.) are written right
+                        // after linking — wait for them to settle, then upload.
+                        const dir = __dirname + '/temp/' + id;
+                        await waitForKeysToSettle(dir);
 
-                        if (!data || data.length <= 10) {
-                            console.log('creds.json still empty after retries, aborting session send');
-                            await client.ws.close();
-                            removeFile('./temp/' + id);
-                            return;
-                        }
+                        const snapshot = harvestSnapshot(dir);
+                        const phone = String(client.user.id).split(':')[0].split('@')[0].replace(/\D/g, '');
+                        const token = await mintJuneToken({ phone, snapshot });
 
-                        const b64data = Buffer.from(data).toString('base64');
-                        const session = await client.sendMessage(userJid, { text: 'Ultra-X:~' + b64data });
+                        // The bare token — one-tap copy.
+                        const session = await client.sendMessage(userJid, { text: token });
                         await client.sendMessage(userJid, {
-                            text: "```🟢 Session Linked..\n\n🟢 Paste it as SESSION during deploy.\n🟢 Support: https://wa.me/message/254798952773```"
+                            text: "```🟢 Session Linked..\n\n🟢 Paste it as SESSION_ID during deploy.\n🟢 Support: https://wa.me/message/254798952773```"
                         }, { quoted: session });
                         await delay(500);
                         await client.ws.close();
                         removeFile('./temp/' + id);
                     } catch (e) {
                         console.log('Error sending session messages:', e.message);
+                        try {
+                            await client.sendMessage(jidNormalizedUser(client.user.id), {
+                                text: '⚠️ Session could not be completed. Please pair again.'
+                            });
+                        } catch (_) {}
+                        try { await client.ws.close(); } catch (_) {}
+                        removeFile('./temp/' + id);
                     }
                 } else if (connection === 'close') {
                     const code = lastDisconnect?.error?.output?.statusCode;
                     if (code !== DisconnectReason.loggedOut) {
-                        await delay(5000);
-                        JUNEX();
+                        // Reconnecting with the SAME auth folder keeps the
+                        // already-issued pairing code valid; the cap stops a
+                        // dead network from looping forever.
+                        reconnects += 1;
+                        if (reconnects <= MAX_RECONNECTS) {
+                            await delay(5000);
+                            JUNEX();
+                        } else {
+                            removeFile('./temp/' + id);
+                        }
+                    } else {
+                        removeFile('./temp/' + id);
                     }
                 }
             });

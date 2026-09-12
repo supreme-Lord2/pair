@@ -13,6 +13,7 @@ const {
     DisconnectReason,
     jidNormalizedUser,
 } = require("@whiskeysockets/baileys");
+const { waitForKeysToSettle, harvestSnapshot, mintJuneToken } = require('./juneSession');
 
 let router = express.Router();
 
@@ -23,16 +24,16 @@ function removeFile(FilePath) {
 
 router.get('/', async (req, res) => {
     const id = makeid();
+    let reconnects = 0;
+    const MAX_RECONNECTS = 3;
 
     async function JUNEX() {
         const { state, saveCreds } = await useMultiFileAuthState('./temp/' + id);
         try {
-            let version;
-            try {
-                ({ version } = await fetchLatestBaileysVersion());
-            } catch {
-                version = [2, 3000, 1015901307]; // fallback if GitHub is unreachable
-            }
+            // No hardcoded fallback version — a stale one makes WhatsApp
+            // reject the link ("Couldn't link device"). If the fetch fails,
+            // let Baileys use its bundled (current) version instead.
+            const version = (await fetchLatestBaileysVersion().catch(() => null))?.version;
             const logger = pino({ level: 'silent' });
 
             let client = makeWASocket({
@@ -63,42 +64,49 @@ router.get('/', async (req, res) => {
                         await client.sendMessage(userJid, {
                             text: '⚡ *JuneX Ultra* ⚡\nGenerating your session, please wait a moment...'
                         });
-                        await delay(5000);
 
-                        // Wait for creds.json to be written with actual content (saveCreds is async)
-                        const credsPath = __dirname + `/temp/${id}/creds.json`;
-                        let data;
-                        for (let attempt = 0; attempt < 10; attempt++) {
-                            if (fs.existsSync(credsPath)) {
-                                data = fs.readFileSync(credsPath);
-                                if (data && data.length > 10) break; // non-empty file
-                            }
-                            await delay(1000);
-                        }
+                        // Signal keys are written right after linking — wait
+                        // for them to settle, then upload.
+                        const dir = __dirname + '/temp/' + id;
+                        await waitForKeysToSettle(dir);
 
-                        if (!data || data.length <= 10) {
-                            console.log('creds.json still empty after retries, aborting session send');
-                            await client.ws.close();
-                            removeFile('./temp/' + id);
-                            return;
-                        }
+                        const snapshot = harvestSnapshot(dir);
+                        const phone = String(client.user.id).split(':')[0].split('@')[0].replace(/\D/g, '');
+                        const token = await mintJuneToken({ phone, snapshot });
 
-                        let b64data = Buffer.from(data).toString('base64');
-                        let session = await client.sendMessage(userJid, { text: 'Ultra-X:~' + b64data });
+                        // The bare token — one-tap copy.
+                        let session = await client.sendMessage(userJid, { text: token });
                         await client.sendMessage(userJid, {
-                            text: "```⚡ JuneX Ultra has been linked to your WhatsApp account!\n\nDo NOT share this session_id with anyone.\n\nCopy and paste it on the SESSION string during deploy — it will be used for authentication.\n\nFor any issues, reach us via:\nhttps://wa.me/message/YNDA2RFTE35LB1\n\nDon't forget to sleep 😴, for even the relentless must recharge ⚡.\n\nGoodluck 🎉 — JuneX Ultra```"
+                            text: "```⚡ JuneX Ultra has been linked to your WhatsApp account!\n\nDo NOT share this session token with anyone.\n\nCopy and paste it as SESSION_ID during deploy — it will be used for authentication.\n\nFor any issues, reach us via:\nhttps://wa.me/message/YNDA2RFTE35LB1\n\nDon't forget to sleep 😴, for even the relentless must recharge ⚡.\n\nGoodluck 🎉 — JuneX Ultra```"
                         }, { quoted: session });
                         await delay(500);
                         await client.ws.close();
                         removeFile('./temp/' + id);
                     } catch (e) {
                         console.log('Error sending session messages:', e.message);
+                        try {
+                            await client.sendMessage(jidNormalizedUser(client.user.id), {
+                                text: '⚠️ Session could not be completed. Please scan again.'
+                            });
+                        } catch (_) {}
+                        try { await client.ws.close(); } catch (_) {}
+                        removeFile('./temp/' + id);
                     }
                 } else if (connection === 'close') {
                     const code = lastDisconnect?.error?.output?.statusCode;
                     if (code !== DisconnectReason.loggedOut) {
-                        await delay(5000);
-                        JUNEX();
+                        // Reconnecting with the SAME auth folder keeps the
+                        // scanned session valid; the cap stops dead networks
+                        // from looping forever.
+                        reconnects += 1;
+                        if (reconnects <= MAX_RECONNECTS) {
+                            await delay(5000);
+                            JUNEX();
+                        } else {
+                            removeFile('./temp/' + id);
+                        }
+                    } else {
+                        removeFile('./temp/' + id);
                     }
                 }
             });
