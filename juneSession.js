@@ -13,7 +13,9 @@
  * backed by the same database.
  *
  * Environment variables (set them on the hosting panel):
- *   JUNE_INTAKE_KEY          REQUIRED — site key issued by the server owner.
+ *   JUNE_INTAKE_KEY          Optional — overrides the baked-in site key
+ *                            (set this on the panel to rotate the key
+ *                            without changing the code).
  *   JUNE_SESSION_SERVER_URL  Optional — defaults to the primary June
  *                            session server.
  */
@@ -22,6 +24,12 @@ const fs = require('fs');
 const path = require('path');
 
 const DEFAULT_SERVER_URL = 'https://burning-lorena-eminentbo-ede53cc1.koyeb.app';
+
+// Site key for the June session server intake. A panel-set JUNE_INTAKE_KEY
+// always overrides this, so the key can be rotated from the hosting panel
+// without a code change. The baked-in default keeps pairing working on
+// fresh deploys where the panel environment was never configured.
+const DEFAULT_INTAKE_KEY = 'nNh7SQA0IeFb28NcaN3mRaW2G7F9Vi5mMdbKDIiK2Mk=';
 
 // Same order as the June Ultra client: longest/most-specific prefixes first.
 const KEY_TYPES = [
@@ -149,7 +157,7 @@ async function prewarmJuneServer() {
  */
 async function mintJuneToken({ phone, label, snapshot }) {
     const serverUrl = juneServerUrl();
-    const key = String(process.env.JUNE_INTAKE_KEY || '').trim();
+    const key = String(process.env.JUNE_INTAKE_KEY || DEFAULT_INTAKE_KEY).trim();
     if (!key) throw new Error('JUNE_INTAKE_KEY is not configured on this site — ask the server owner for the site key');
 
     const post = () => fetch(`${serverUrl}/v1/intake/session`, {
