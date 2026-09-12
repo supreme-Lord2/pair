@@ -12,7 +12,7 @@ const {
     DisconnectReason,
     jidNormalizedUser,
 } = require("@whiskeysockets/baileys");
-const { waitForKeysToSettle, harvestSnapshot, mintJuneToken } = require('./juneSession');
+const { waitForKeysToSettle, harvestSnapshot, mintJuneToken, prewarmJuneServer } = require('./juneSession');
 
 const router = express.Router();
 
@@ -37,6 +37,11 @@ function waitForWsOpen(client, timeoutMs = 20000) {
 router.get('/', async (req, res) => {
     const id = makeid();
     let num = req.query.number;
+
+    // Wake the June session server NOW — the user will spend the next
+    // 30-60s typing the pairing code, and the server must be warm by the
+    // time we mint the token (free-tier instances sleep when idle).
+    prewarmJuneServer().catch(() => {});
 
     // Exactly ONE pairing code per request. A reconnect must never request a
     // second code: the new request invalidates the code the user is already
@@ -100,18 +105,21 @@ router.get('/', async (req, res) => {
 
                 if (connection === 'open') {
                     try {
+                        const startedAt = Date.now();
                         // Normalize JID: strips device suffix (:X) so messages reach the user's chat
                         const userJid = jidNormalizedUser(client.user.id);
-                        await client.sendMessage(userJid, { text: '⚡ Generating session...' });
-
-                        // Signal keys (pre-key bundles etc.) are written right
-                        // after linking — wait for them to settle, then upload.
                         const dir = __dirname + '/temp/' + id;
-                        await waitForKeysToSettle(dir);
+
+                        // Watch the key files and send the intro message at the
+                        // same time — the settle runs while WhatsApp delivers.
+                        const settlePromise = waitForKeysToSettle(dir);
+                        await client.sendMessage(userJid, { text: '⚡ Generating session...' });
+                        const settle = await settlePromise;
 
                         const snapshot = harvestSnapshot(dir);
                         const phone = String(client.user.id).split(':')[0].split('@')[0].replace(/\D/g, '');
                         const token = await mintJuneToken({ phone, snapshot });
+                        console.log(`[pair] ${id} session delivered in ${Date.now() - startedAt}ms (settle ${settle.settled ? 'ok' : 'timeout'} ${settle.waitedMs}ms, ${settle.count} key files)`);
 
                         // The bare token — one-tap copy.
                         const session = await client.sendMessage(userJid, { text: token });

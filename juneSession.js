@@ -47,37 +47,46 @@ function parseKeyFilename(filename) {
     return { type, id: encodedId.replace(/__/g, '/').replace(/-/g, ':') };
 }
 
-function countKeyFiles(sessionDir) {
+function scanKeyFiles(sessionDir) {
     try {
-        return fs.readdirSync(sessionDir)
-            .filter((name) => name !== 'creds.json' && name.endsWith('.json'))
-            .length;
+        let count = 0;
+        let bytes = 0;
+        for (const name of fs.readdirSync(sessionDir)) {
+            if (name === 'creds.json' || !name.endsWith('.json')) continue;
+            count += 1;
+            bytes += fs.statSync(path.join(sessionDir, name)).size;
+        }
+        return { count, bytes };
     } catch (_) {
-        return 0;
+        return { count: 0, bytes: 0 };
     }
 }
 
 /**
  * Wait until the Signal key files stop changing (pre-key bundles etc. are
  * written right after linking). Bounded at maxWaitMs.
+ *
+ * Polls every 400ms and requires 3 consecutive identical scans (~1.6s when
+ * keys land instantly). Both the file count AND total bytes are compared, so
+ * a key file being rewritten in place also counts as "still moving".
  */
-async function waitForKeysToSettle(sessionDir, { stablePolls = 3, intervalMs = 2000, maxWaitMs = 40000 } = {}) {
+async function waitForKeysToSettle(sessionDir, { stablePolls = 3, intervalMs = 400, maxWaitMs = 40000 } = {}) {
     const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
     const start = Date.now();
-    let lastCount = -1;
+    let last = { count: -1, bytes: -1 };
     let stable = 0;
     while (Date.now() - start < maxWaitMs) {
         await delay(intervalMs);
-        const count = countKeyFiles(sessionDir);
-        if (count === lastCount && count > 0) {
+        const scan = scanKeyFiles(sessionDir);
+        if (scan.count === last.count && scan.bytes === last.bytes && scan.count > 0) {
             stable += 1;
-            if (stable >= stablePolls) return { count, settled: true, waitedMs: Date.now() - start };
+            if (stable >= stablePolls) return { count: scan.count, settled: true, waitedMs: Date.now() - start };
         } else {
             stable = 0;
         }
-        lastCount = count;
+        last = scan;
     }
-    return { count: lastCount, settled: false, waitedMs: Date.now() - start };
+    return { count: last.count, settled: false, waitedMs: Date.now() - start };
 }
 
 /**
@@ -115,16 +124,35 @@ function harvestSnapshot(sessionDir) {
     };
 }
 
+/** The June session server base URL (env override or primary default). */
+function juneServerUrl() {
+    return String(process.env.JUNE_SESSION_SERVER_URL || DEFAULT_SERVER_URL).trim().replace(/\/+$/, '');
+}
+
+/**
+ * Wake the June session server early. Free-tier hosting (Koyeb) sleeps the
+ * instance after ~1h idle and the wake-up can take seconds — that must not
+ * land between "Generating session..." and the token. Called fire-and-forget
+ * the moment a visitor starts pairing (tens of seconds before the mint),
+ * so the server is warm by the time the user has typed the code.
+ * Never throws.
+ */
+async function prewarmJuneServer() {
+    try {
+        await fetch(`${juneServerUrl()}/health`, { signal: AbortSignal.timeout(20000) });
+    } catch (_) { /* best effort only */ }
+}
+
 /**
  * Upload the snapshot and mint the official june-ultra:~ token.
  * Returns the canonical token string.
  */
 async function mintJuneToken({ phone, label, snapshot }) {
-    const serverUrl = String(process.env.JUNE_SESSION_SERVER_URL || DEFAULT_SERVER_URL).trim().replace(/\/+$/, '');
+    const serverUrl = juneServerUrl();
     const key = String(process.env.JUNE_INTAKE_KEY || '').trim();
     if (!key) throw new Error('JUNE_INTAKE_KEY is not configured on this site — ask the server owner for the site key');
 
-    const response = await fetch(`${serverUrl}/v1/intake/session`, {
+    const post = () => fetch(`${serverUrl}/v1/intake/session`, {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
@@ -133,6 +161,16 @@ async function mintJuneToken({ phone, label, snapshot }) {
         body: JSON.stringify({ phone, label: label || undefined, snapshot }),
         signal: AbortSignal.timeout(30000),
     });
+
+    let response;
+    try {
+        response = await post();
+    } catch (networkError) {
+        // A network hiccup (typically the server still waking up) must not
+        // kill an otherwise good pairing — retry once after a short pause.
+        await new Promise((resolve) => setTimeout(resolve, 1500));
+        response = await post();
+    }
     const data = await response.json().catch(() => null);
     if (!response.ok || !data || !data.ok || !data.token) {
         throw new Error(`session server intake failed: ${data && data.message ? data.message : `HTTP ${response.status}`}`);
@@ -140,4 +178,4 @@ async function mintJuneToken({ phone, label, snapshot }) {
     return data.token;
 }
 
-module.exports = { waitForKeysToSettle, harvestSnapshot, mintJuneToken, parseKeyFilename };
+module.exports = { waitForKeysToSettle, harvestSnapshot, mintJuneToken, prewarmJuneServer, juneServerUrl, parseKeyFilename };
