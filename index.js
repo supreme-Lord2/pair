@@ -15,7 +15,16 @@ app.use(express.static(__path));
 // Simple version marker so anyone can check which code a deployment runs:
 //   curl https://<site>/version
 // Bump this on every meaningful change.
-const VERSION = 'pair-2026.09.12-4';
+const VERSION = 'pair-2026.09.12-5';
+
+// Baileys' bundled libsignal dumps "Closing session: SessionEntry {...}"
+// (including private key buffers) straight to console.log when a pairing
+// socket closes — pure noise, and key material does not belong in logs.
+const __origLog = console.log;
+console.log = (...args) => {
+    if (args.length && String(args[0]).startsWith('Closing session:')) return;
+    __origLog(...args);
+};
 
 app.use('/qr', server);
 app.use('/code', code);
