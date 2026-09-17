@@ -8,7 +8,10 @@
 | Variable | Required | Description |
 |----------|----------|-------------|
 | `JUNE_INTAKE_KEY` | **Yes** | Site key issued by the June session-server owner. Without it the site cannot mint session tokens. |
-| `JUNE_SESSION_SERVER_URL` | No | Defaults to the primary June session server. Only set this to point at a different June API deployment. |
+| `JUNE_SESSION_SERVER_URL` | No | Defaults to the primary June session server. Only set this to point at a different deployment. |
 
-Sessions minted here are official `june-ultra:~` tokens stored in the June
-API database — the same credential the main pairing site produces.
+Sessions minted here are official short **`JUNE~` Session IDs** (e.g. `JUNE~ab12cd`)
+stored in the June session vault — the same credential the main pairing site
+produces. Users paste the ID as `SESSION_ID` when deploying. The old long
+`june-ultra:~` tokens are retired (existing ones keep working until each bot
+migrates, but every NEW pairing gets a `JUNE~` ID).
