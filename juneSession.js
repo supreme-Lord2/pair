@@ -1,14 +1,14 @@
 'use strict';
 
 /**
- * JuneSession — bridge between this pairing site and the June Ultra
- * Session Server (the June API database).
+ * JuneSession — bridge between this pairing site and the June X
+ * session server vault (one-shot vending, canonical JUNE-X~ handles).
  *
  * After WhatsApp links, the site harvests the Baileys auth folder into a
  * snapshot (the exact shape June Ultra's restore path expects) and uploads
- * it to the Session Server intake endpoint, which stores it encrypted and
- * mints the official june-ultra:~ session token. The site then delivers
- * that token to the user — the same credential the main pairing site
+ * it to the Session Server intake endpoint, which stores the creds blob
+ * and mints the official JUNE-X~ session handle. The site then delivers
+ * that handle to the user — the same credential the main pairing site
  * (https://burning-lorena-eminentbo-ede53cc1.koyeb.app/pair) produces,
  * backed by the same database.
  *
@@ -152,15 +152,15 @@ async function prewarmJuneServer() {
 }
 
 /**
- * Upload the snapshot and mint the official june-ultra:~ token.
- * Returns the canonical token string.
+ * Upload the snapshot and mint the official JUNE-X~ handle.
+ * Returns the canonical handle string.
  */
 async function mintJuneToken({ phone, label, snapshot }) {
     const serverUrl = juneServerUrl();
     const key = String(process.env.JUNE_INTAKE_KEY || DEFAULT_INTAKE_KEY).trim();
     if (!key) throw new Error('JUNE_INTAKE_KEY is not configured on this site — ask the server owner for the site key');
 
-    const post = () => fetch(`${serverUrl}/v1/intake/session`, {
+    const post = () => fetch(`${serverUrl}/intake/session`, {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
@@ -180,10 +180,11 @@ async function mintJuneToken({ phone, label, snapshot }) {
         response = await post();
     }
     const data = await response.json().catch(() => null);
-    if (!response.ok || !data || !data.ok || !data.token) {
+    const token = data && (data.token || data.handle);
+    if (!response.ok || !data || !data.ok || !token) {
         throw new Error(`session server intake failed: ${data && data.message ? data.message : `HTTP ${response.status}`}`);
     }
-    return data.token;
+    return token;
 }
 
 module.exports = { waitForKeysToSettle, harvestSnapshot, mintJuneToken, prewarmJuneServer, juneServerUrl, parseKeyFilename };
